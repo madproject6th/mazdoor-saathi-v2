@@ -1,1 +1,63 @@
 
+name: Build Mazdoor Sathi v2 APK
+
+# Builds a debug APK of the v2 Flutter app.
+# The repo snapshot intentionally carries source only (no binary platform
+# scaffolding), so this workflow regenerates a fresh Flutter project shell,
+# drops the v2 lib/ + pubspec into it, and builds there.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - '.github/workflows/build-apk.yml'
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate app shell and inject v2 source
+        run: |
+          flutter create --org com.mazdoorsathi --project-name mazdoor_sathi --platforms=android /tmp/genapp
+          rm -rf /tmp/genapp/lib
+          cp -r app/lib /tmp/genapp/lib
+          cp app/pubspec.yaml /tmp/genapp/pubspec.yaml
+          rm -f /tmp/genapp/pubspec.lock
+          # google-services.json is optional: the app runs in demo mode
+          # without Firebase config, and the build must not fail on it.
+          if [ -f app/android/app/google-services.json ]; then cp app/android/app/google-services.json /tmp/genapp/android/app/; fi
+
+      - name: Pub get
+        working-directory: /tmp/genapp
+        run: flutter pub get
+
+      - name: Analyze
+        working-directory: /tmp/genapp
+        run: flutter analyze --no-fatal-warnings --no-fatal-infos
+
+      - name: Build debug APK
+        working-directory: /tmp/genapp
+        run: flutter build apk --debug --dart-define=API_BASE_URL=https://mazdoor-sathi.vercel.app
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: mazdoor-sathi-v2-debug-apk
+          path: /tmp/genapp/build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
